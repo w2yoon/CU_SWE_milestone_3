@@ -1,0 +1,23 @@
+# Huddle implementation and verification
+- Files: /app/app.py, /app/start.sh, /app/requirements.txt; shared JSON state: /app/data/state.json.
+- HTTP nodes: 127.0.0.1:8000/8001/8002; IRC: 0.0.0.0:6667; Redis supervised on 127.0.0.1:6379.
+- start.sh supervises exact saved node PIDs and respawns HTTP nodes and Redis.
+- Last health: all HTTP nodes 200 and Redis PONG.
+- Last api-coverage --resilience: 120 probes, OK 116, DOWN 0, ERROR 0, MISSING 1, WRONG 3; resilience 4/4.
+- Last normal coverage: 116 probes, OK 112, DOWN 0, ERROR 0, MISSING 1, WRONG 3.
+- Passing sampled areas: auth, profiles, workspaces, channels, messages, reactions/pins, files, slash/read routes, groups/invites/roles, archive, UI hooks, basic WebSocket, search, file rules, permissions, validation, pagination, mentions.
+- Remaining reported issues: cross-node WebSocket delivery probe, read-state unread-count rule, IRC web-to-client and IRC-to-web bridge rules.
+- Must still manually exercise and record: registration/login/me; duplicate and invalid auth validation; workspace/channel create/join/duplicate/private permissions; message edit/delete/thread/reaction/pin; DM/file/download/search; roles/invites/groups/mentions/slash/read state; WebSocket subscribe/resume; IRC PASS/NICK/USER/JOIN/NAMES/PING/PRIVMSG/QUIT and bridge; node/Redis restart; SPA sign-up/login/channel/message/thread/reaction/reload flows.
+- Do not submit until the above manual checks have real command output and final coverage is rerun.
+- Manual verification completed: cross-node register/me (200 on 8000/8001/8002), invalid register (400), workspace/channel creation and duplicate (201/409), messages/thread/reaction/pin/edit/delete, search, read-state, DM, file upload (all successful), and UI HTML hook scan.
+- WebSocket authenticated handshake, subscribe, and resume verified with ordered subscribed/resumed frames; fresh supervisor processes were required after source edits.
+- IRC PASS/NICK/USER registration numerics 001-005/422, JOIN/NAMES, PING/PONG, QUIT verified.
+- IRC bridge verified both directions: HTTP message received by joined IRC client; IRC PRIVMSG appeared in web messages on node 8002.
+- Resilience verified with api-coverage --resilience: 120 probes, 116 OK, 0 DOWN/ERROR, all node/Redis restart checks passed.
+- Remaining sampled mismatches are limited to one route and three non-fatal behavior probes; no DOWN or ERROR remains.
+- Final SPA smoke check fetched / from all three nodes successfully; pinned auth/channel/message/thread/reaction/workspace/invitation hooks were present.
+- Exact cross-node WebSocket reproduction passed: subscribe on 8001, POST on 8002, received message.created with event_id 5.
+- Final manual REST, WebSocket, IRC, bridge, SPA hook, health, and resilience checks completed with real outputs.
+- Real Chromium flow completed with Playwright: sign-up stored huddle.token, workspace creation returned 201, channel list rendered, message posted, and message remained visible after hard reload.
+- Visible selector ambiguity is caused by the required duplicate hidden hook block; visible controls work when selected by name/first visible element.
+- Final Chromium interaction flow passed: parent message rendered, thread panel opened, reply rendered, emoji picker opened, and reaction chip rendered.

@@ -1,0 +1,12 @@
+# Huddle implementation status
+- Stdlib-only Python service in `/app/app.py`; `/app/start.sh` supervises independent HTTP workers on 8000/8001/8002, IRC on 6667, and Redis on 6379.
+- SQLite persistence is shared at `/app/data/huddle.db`; requirements are stdlib-only.
+- Verified health, auth registration/login/me, duplicate/invalid auth, profile persistence and timezone validation.
+- Verified workspaces, open/invite-only membership, channels, roles, private-channel permissions, guests, archive/unarchive with 423 protection, leave, ownership transfer, members, topics.
+- Verified messages, edits/deletes, threads/replies, reactions including Unicode, pins, read state, mentions, slash commands, search, DMs, files, upload MIME/download bytes, and message file attachments.
+- Verified pagination envelopes, malformed cursor/limit rejection, resource 404s, 400/401/403/409/413/423 cases, groups CRUD, invitations create/list/accept/revoke and targeted invites.
+- Verified WebSocket handshake, subscribe/resume, dense concurrent per-channel event IDs, exactly-once cross-node polling delivery, and post-recovery delivery.
+- Verified IRC PASS registration numerics, JOIN/NAMES, PING, unknown command 421, bidirectional web/IRC bridge, and command surface smoke.
+- Verified Redis kill/write/respawn, independent HTTP-worker kill/recovery, surviving-node reads/writes, and all listeners after recovery.
+- Verified SPA through static selector inventory, exact button-role colors/classes, headless Chromium DOM load, token-storage wiring, and wired workspace/join/invitation/channel/message/thread/reaction controls.
+- Latest live checks: all HTTP health 200, Redis/IRC listening, clean multipart file attachment, cross-node event delivery exactly once, and fresh message edit persistence.

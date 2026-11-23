@@ -1,0 +1,19 @@
+{
+    "task": {
+        "path": "tasks/slack-clone-course/course-staff-files/final_task"
+    },
+    "trial_name": "final_task__YFJWKTd",
+    "trials_dir": "/Users/jhc/Desktop/Columbia/AdvSoft/M3-w1/tasks/slack-clone-course/jobs/2026-11-22__16-28-38",
+    "agent": {
+        "name": "mini_swe_agent_local:MiniSweAgentLocal",
+        "model_name": "openai/gpt-5.6-luna",
+        "kwargs": {
+            "config_file": "/Users/jhc/Desktop/Columbia/AdvSoft/M3-w1/tasks/slack-clone-course/course-staff-files/final_task/agent_llm_config/mswea-openai-gpt-5.6-luna-no-reasoning.yaml",
+            "cost_limit": 3
+        }
+    },
+    "verifier": {
+        "disable": true
+    },
+    "job_id": "077832ba-52d9-4c3f-a90a-64c11b944bf8"
+}
