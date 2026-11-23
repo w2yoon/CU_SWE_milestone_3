@@ -123,6 +123,8 @@ class InteractiveAgent(DefaultAgent):
 
     def execute_actions(self, message: dict) -> list[dict]:
         # Override to handle user confirmation and confirm_exit, with try/finally to preserve partial outputs
+        if held := self.hold_early_submit(message):
+            return held
         actions = message.get("extra", {}).get("actions", [])
         commands = [action["command"] for action in actions]
         outputs = []

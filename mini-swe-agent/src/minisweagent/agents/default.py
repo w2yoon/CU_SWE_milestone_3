@@ -38,6 +38,25 @@ class AgentConfig(BaseModel):
     format_error_log_path: Path | None = None
     """Append each rejected (FormatError) model response here as JSONL, for bad-example
     mining and manual investigation. If None, defaults to <output_path dir>/format_errors.jsonl."""
+    api_coverage_tool: bool = False
+    """Enable the `api-coverage` command (minisweagent/tools/api_coverage.py) for this run."""
+    memory: bool = False
+    """Working memory: show the notes file and a step/time/cost meter after every command,
+    and trim old steps from the prompt (the saved trajectory keeps everything)."""
+    memory_notes_path: str = "/app/NOTES.md"
+    memory_notes_max_chars: int = 3000
+    memory_keep_recent_steps: int = 8
+    """The newest steps are always sent in full."""
+    memory_trim_every_steps: int = 10
+    """Older steps are trimmed in blocks of this many steps, so the prompt prefix stays the same
+    between blocks (keeps the provider's prompt cache useful)."""
+    memory_trim_chars: int = 600
+    """A trimmed message keeps this many characters (half from the start, half from the end)."""
+    memory_time_budget_seconds: int = 3000
+    memory_hold_early_submit: float = 0.6
+    """With memory on, a submit is held back while both time and cost used are below this fraction..."""
+    memory_max_holds: int = 3
+    """...up to this many times per run."""
 
 
 class DefaultAgent:
@@ -53,6 +72,10 @@ class DefaultAgent:
         self.n_calls = 0
         self.n_consecutive_format_errors = 0
         self._start_time = time.time()
+        if self.config.api_coverage_tool:
+            env_vars = getattr(getattr(self.env, "config", None), "env", None)
+            if isinstance(env_vars, dict):
+                env_vars |= {"MSWEA_API_COVERAGE": "1", "MSWEA_SILENT_STARTUP": "1"}
 
     def get_template_vars(self, **kwargs) -> dict:
         return recursive_merge(
@@ -177,13 +200,83 @@ class DefaultAgent:
                 }
             )
         self.n_calls += 1
-        message = self.model.query(self.messages)
+        message = self.model.query(self.prompt_messages() if self.config.memory else self.messages)
         self.cost += message.get("extra", {}).get("cost", 0.0)
         self.add_messages(message)
         return message
 
+    def prompt_messages(self) -> list[dict]:
+        """The messages sent to the model when memory is on: old steps trimmed, memory block appended."""
+        head, body = self.messages[:2], self.messages[2:]
+        cfg = self.config
+        n_steps = sum(m.get("role") == "assistant" for m in body)
+        n_trim = max(0, n_steps - cfg.memory_keep_recent_steps) // cfg.memory_trim_every_steps * cfg.memory_trim_every_steps
+        out, seen = [], 0
+        for msg in body:
+            seen += msg.get("role") == "assistant"
+            content = msg.get("content")
+            if seen <= n_trim and isinstance(content, str) and len(content) > cfg.memory_trim_chars:
+                half = cfg.memory_trim_chars // 2
+                content = (f"{content[:half]}\n[... {len(content) - 2 * half} chars of this old step were trimmed from your "
+                           f"context. Re-read files or re-run commands if you need them; keep what matters in "
+                           f"{cfg.memory_notes_path} ...]\n{content[-half:]}")
+                msg = msg | {"content": content}
+            out.append(msg)
+        if out and isinstance(out[-1].get("content"), str):
+            block = self.memory_block()
+            out[-1] = out[-1] | {"content": out[-1]["content"] + "\n" + block}
+            self.messages[-1].setdefault("extra", {})["memory_block"] = block
+            print(f"[memory] {block.splitlines()[1]} | notes {len(block)} chars | {n_trim} old steps trimmed", flush=True)
+        return head + out
+
+    def hold_early_submit(self, message: dict) -> list[dict] | None:
+        """With memory on, hold back the first submit that comes early; returns the observation messages if held."""
+        if not (self.config.memory and any(self._is_early_submit(a) for a in message.get("extra", {}).get("actions", []))):
+            return None
+        self._submit_holds = getattr(self, "_submit_holds", 0) + 1
+        outputs = [{"output": self._hold_message(), "returncode": 1, "exception_info": ""}]
+        return self.add_messages(*self.model.format_observation_messages(message, outputs, self.get_template_vars()))
+
+    def _is_early_submit(self, action: dict) -> bool:
+        cfg = self.config
+        frac = cfg.memory_hold_early_submit
+        return (
+            "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in action.get("command", "")
+            and getattr(self, "_submit_holds", 0) < cfg.memory_max_holds
+            and time.time() - self._start_time < frac * cfg.memory_time_budget_seconds
+            and (not cfg.cost_limit or self.cost < frac * cfg.cost_limit)
+        )
+
+    def _hold_message(self) -> str:
+        minutes = int(time.time() - self._start_time) // 60
+        return (
+            f"Submission held back ({getattr(self, '_submit_holds', 0)} of {self.config.memory_max_holds}) by the memory system: you have used only {minutes} of "
+            f"{self.config.memory_time_budget_seconds // 60} minutes and ${self.cost:.2f} of ${self.config.cost_limit:.2f}. "
+            f"Nothing was submitted. Before submitting, go through the task's contract section by section, compare it with "
+            f"{self.config.memory_notes_path}, and write down which rules you have not yet tested with real requests "
+            f"(permissions, validation errors, pagination, mentions, read state, WebSocket resume, IRC bridge, restarts, UI flows). "
+            f"Test and fix those, including the browser UI flows of the task (sign-up, channels, messages, threads, reactions). "
+            f"A submit is held back up to {self.config.memory_max_holds} times while less than "
+            f"{int(self.config.memory_hold_early_submit * 100)}% of both the time and the budget is used."
+        )
+
+    def memory_block(self) -> str:
+        cfg = self.config
+        path = Path(cfg.memory_notes_path)
+        notes = path.read_text(errors="replace").strip() if path.is_file() else ""
+        if not notes:
+            notes = f"(empty: {path} does not exist yet. Create it now with your plan.)"
+        elif len(notes) > cfg.memory_notes_max_chars:
+            notes = notes[: cfg.memory_notes_max_chars] + f"\n[... notes cut at {cfg.memory_notes_max_chars} chars: shorten {path}]"
+        elapsed = int(time.time() - self._start_time) // 60
+        cost = f"${self.cost:.2f} of ${cfg.cost_limit:.2f}" if cfg.cost_limit else f"${self.cost:.2f}"
+        return (f"<memory>\nstep {self.n_calls} | {elapsed} of {cfg.memory_time_budget_seconds // 60} min used | cost {cost}\n"
+                f"your notes ({path}):\n{notes}\n</memory>")
+
     def execute_actions(self, message: dict) -> list[dict]:
         """Execute actions in message, add observation messages, return them."""
+        if held := self.hold_early_submit(message):
+            return held
         outputs = [self.env.execute(action) for action in message.get("extra", {}).get("actions", [])]
         return self.add_messages(*self.model.format_observation_messages(message, outputs, self.get_template_vars()))
 
